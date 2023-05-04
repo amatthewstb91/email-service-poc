@@ -9,6 +9,7 @@ terraform {
 
 locals {
   project = "matthew-law-dev"
+  region  = "europe-west2"
 }
 
 resource "random_id" "bucket_prefix" {
@@ -16,28 +17,91 @@ resource "random_id" "bucket_prefix" {
 }
 
 resource "google_storage_bucket" "bucket" {
-  name                        = "${local.project}-ash-gcf-source" # Every bucket name must be globally unique
+  name                        = "${local.project}-ash-gcf-source"
   location                    = "EU"
   uniform_bucket_level_access = true
-  project = "${local.project}"
+  project                     = local.project
 }
+
+# resource "google_storage_bucket_object" "object" {
+#   name   = "test-http-function.zip"
+#   bucket = google_storage_bucket.bucket.name
+#   source = "./functions/testHttpFunction/test-http-function.zip"
+# }
 
 resource "google_storage_bucket_object" "object" {
-  name   = "test-http-function.zip"
+  name   = "test-pubsub-functions.zip"
   bucket = google_storage_bucket.bucket.name
-  source = "./functions/testHttpFunction/test-http-function.zip" # Add path to the zipped function source code
-
+  source = "./functions/testPubSubFunctions/test-pubsub-functions.zip"
 }
 
-resource "google_cloudfunctions2_function" "test_http_function" {
-  name        = "test_http_function"
-  location    = "europe-west2"
-  description = "Ash testing a terraform upload"
-  project = "${local.project}"
+resource "google_pubsub_topic" "topic" {
+  name    = "tf-test-topic"
+  project = local.project
+}
+
+# resource "google_cloudfunctions2_function" "test_http_function" {
+#   name        = "test_http_function"
+#   location    = "europe-west2"
+#   description = "Ash testing a terraform upload"
+#   project = local.project
+
+#   build_config {
+#     runtime     = "nodejs18"
+#     entry_point = "testHttpFunction"
+#     source {
+#       storage_source {
+#         bucket = google_storage_bucket.bucket.name
+#         object = google_storage_bucket_object.object.name
+#       }
+#     }
+#   }
+
+#   service_config {
+#     max_instance_count = 1
+#     available_memory   = "256M"
+#     timeout_seconds    = 60
+#   }
+# }
+
+resource "google_cloudfunctions2_function" "tf_pub_message" {
+  name        = "tf_pub_message"
+  location    = local.region
+  description = "Ash testing a terraform pub message"
+  project     = local.project
 
   build_config {
     runtime     = "nodejs18"
-    entry_point = "testHttpFunction" # Set the entry point (function name, not file name)
+    entry_point = "tfPubMessage"
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.bucket.name
+        object = google_storage_bucket_object.object.name
+      }
+    }
+  }
+
+  service_config {
+    max_instance_count = 1
+    available_memory   = "256M"
+    timeout_seconds    = 60
+    environment_variables = {
+      TOPIC_NAME: google_pubsub_topic.topic.id
+    }
+  }
+}
+
+resource "google_cloudfunctions2_function" "tf_sub_message" {
+  name        = "tf_sub_message"
+  location    = local.region
+  description = "Ash testing a terraform sub message"
+  project     = local.project
+
+  build_config {
+    runtime     = "nodejs18"
+    entry_point = "tfSubMessage"
+
     source {
       storage_source {
         bucket = google_storage_bucket.bucket.name
@@ -51,8 +115,19 @@ resource "google_cloudfunctions2_function" "test_http_function" {
     available_memory   = "256M"
     timeout_seconds    = 60
   }
+
+  event_trigger {
+    trigger_region  = local.region
+    event_type      = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic    = google_pubsub_topic.topic.id
+    retry_policy    = "RETRY_POLICY_RETRY"
+  }
 }
 
-output "function_uri" {
-  value = google_cloudfunctions2_function.test_http_function.service_config[0].uri
+output "pub_function_uri" {
+  value = google_cloudfunctions2_function.tf_pub_message.service_config[0].uri
+}
+
+output "sub_func_id" {
+  value = google_cloudfunctions2_function.tf_sub_message.id
 }

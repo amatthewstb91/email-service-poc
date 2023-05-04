@@ -1,10 +1,12 @@
 {
+  "include": ["./index.ts"],
   "compilerOptions": {
     "module": "commonjs",
     "noImplicitReturns": true,
     "noUnusedLocals": true,
     "strict": true,
     "target": "es2017",
+    "outDir": "dist",
   },
   "compileOnSave": true,
 }
